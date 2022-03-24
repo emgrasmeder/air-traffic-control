@@ -1,0 +1,105 @@
+= Flight Control Tower
+
+JUXT has partnered with a major Air Traffic Controller for airports all over the
+world. One of the key systems we're tasked with building must take flight events
+from ground crews to be used in decision making and showing live departures.
+
+The events are sent in plain text and structured as follows:
+
+ - Plane ID
+ - Plane Model
+ - Origin
+ - Destination
+ - Event Type
+ - Timestamp
+ - Fuel Delta
+
+Events arrive as lines of text, so your program should expect to receive events
+in this format:
+
+----
+F222 747 DUBLIN LONDON Re-Fuel 2021-03-29T10:00:00 200
+F551 747 PARIS LONDON Re-Fuel 2021-03-29T10:00:00 345
+F324 313 LONDON NEWYORK Take-Off 2021-03-29T12:00:00 0
+F123 747 LONDON CAIRO Re-Fuel 2021-03-29T10:00:00 428
+F123 747 LONDON CAIRO Take-Off 2021-03-29T12:00:00 0
+F551 747 PARIS LONDON Take-Off 2021-03-29T11:00:00 0
+F551 747 PARIS LONDON Land 2021-03-29T12:00:00 -120
+F123 747 LONDON CAIRO Land 2021-03-29T14:00:00 -324
+----
+
+The control tower needs to know the following for each flight at any given point
+in time:
+
+ - Plane ID
+ - Flight Status
+ - Last known fuel level
+
+For example at `2021-03-29T15:00:00`, the output would be:
+
+----
+F123 Landed 104
+F222 Awaiting-Takeoff 200
+F324 In-Flight 0
+F551 Landed 225
+----
+
+Sometimes the ground crews make mistakes, corrections may be issued for any
+event you've received this could be removing events or changing their data.
+
+Given the update:
+
+----
+F551 747 PARIS LONDON Land 2021-03-29T12:00:00 -300
+----
+
+The output would be:
+
+----
+F123 Landed 104
+F222 Awaiting-Takeoff 200
+F324 In-Flight 0
+F551 Landed 45
+----
+
+Or given the removal of an event:
+
+----
+F551 2021-03-29T12:00:00
+----
+
+The output would be:
+
+----
+F123 Landed 104
+F222 Awaiting-Takeoff 200
+F324 In-Flight 0
+F551 In-Flight 345
+----
+
+We'd like to see a test suite to prove that your program works as expected.
+
+Your program doesn't need a GUI, just make sure we can interact with it via the
+command line or a REPL.
+You don't need a persistence layer. Your program can store everything in memory (or be composed of pure functions).
+However, if you would prefer to use a database, you're welcome to do so,
+as long as it's clearly documented how to set up and run the project.
+
+You have freedom to choose your favourite way to interact with the program, but please
+document clearly in a README file how to run the project/tests, and if there are
+dependencies make sure they are downloadable automatically or you include all the required files in your submissions to make sure
+anyone can just run it.
+
+== Languages
+
+Please consider submitting your solution in any of the following languages:
+
+- Clojure
+- Kotlin
+- Python
+- Java
+- Javascript/Typescript
+
+In case you don't have much experience with any of the languages above, but decide to pick one from the list regardless, we will appreciate the extra effort and time required to send your solution.
+
+If you really prefer to use a different language, we'll try our best to accommodate your choice. Thanks!
