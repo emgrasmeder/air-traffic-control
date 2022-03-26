@@ -1,7 +1,8 @@
 (ns air-traffic-control.events
   (:require [clojure.spec.alpha :as s]
             [clojure.instant :as instant]
-            [clojure.string :as clj-str]))
+            [clojure.string :as clj-str]
+            [clojure.set :as clj-set]))
 
 (s/def ::event 
   (s/or :update ::update 
@@ -38,3 +39,25 @@
 
 (s/def ::plane-id string?)
 (s/def ::timestamp #(inst? (instant/read-instant-date %)))
+
+
+(def new-event{:timestamp "2021-03-29T10:00:00", :event-type "Re-Fuel", :fuel-status "200", :status "OK"})
+
+
+(defn add-event-to-flights-log 
+  [new-event events]
+  (-> new-event
+      (select-keys [:timestamp :event-type :fuel-delta])
+      (clj-set/rename-keys {:fuel-delta :fuel-status})
+      (assoc :status "OK")
+      (#(conj [] %))
+      (concat events)
+      (#(filter identity %))
+      (#(sort-by :timestamp %))))
+
+(defn insert
+  "Inserts events into the program state. It should be an event sourcing solution but
+  I don't have much experience with protocols and multimethods and figuring it out was going too slow
+  so I opted for something that worked over."
+  [state new-event]
+  (swap! state #(update-in % [:state :flights (:plane-id new-event)] (partial add-event-to-flights-log new-event))))
