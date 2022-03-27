@@ -1,6 +1,7 @@
 (ns air-traffic-control.core-test
   (:require [clojure.test :as t]
             [air-traffic-control.core :as atc]
+            [clj-time.core :as clj-time]
             [air-traffic-control.events :as events]
             [clojure.spec.alpha :as s]
             [clojure.string :as clj-str]))
@@ -63,31 +64,98 @@
                         (atc/update-event-log))]
         (t/is (= result1
                  {:state {:flights {"F111" [{:timestamp   "1111-01-01T00:00:00"
+                                             :plane-id    "F111"
                                              :event-type  "Re-Fuel"
                                              :fuel-status "200"
                                              :status      "OK"}]}}}))
         (t/is (= result2
                  {:state {:flights {"F111" [{:timestamp   "1111-01-01T00:00:00"
+                                             :plane-id    "F111"
                                              :event-type  "Re-Fuel"
                                              :fuel-status "200"
                                              :status      "OK"}]
                                     "F222" [{:timestamp   "2222-01-01T00:00:00"
+                                             :plane-id    "F222"
                                              :event-type  "Re-Fuel"
                                              :fuel-status "200"
                                              :status      "OK"}]}}}))
         (t/is (= result3
                  {:state {:flights {"F111" [{:timestamp   "1111-01-01T00:00:00"
+                                             :plane-id    "F111"
                                              :event-type  "Re-Fuel"
                                              :fuel-status "200"
                                              :status      "OK"}]
-                                    "F222" [{:timestamp   "1111-01-01T00:00:00"
+                                    "F222" [{:timestamp   "2222-01-01T00:00:00"
+                                             :plane-id    "F222"
                                              :event-type  "Re-Fuel"
                                              :fuel-status "200"
                                              :status      "OK"}
-                                            {:timestamp   "2222-01-01T00:00:00"
+                                            {:timestamp   "1111-01-01T00:00:00"
+                                             :plane-id    "F222"
                                              :event-type  "Re-Fuel"
                                              :fuel-status "200"
                                              :status      "OK"}]}}}))))))
+
+
+
+
+(t/deftest remove-timestamps-after-test
+  (t/testing "should remove timestamps after time-query from collection"
+    (let [yesterday  {:timestamp (clj-time/minus (clj-time/now) (clj-time/days 1))}
+          today      {:timestamp (clj-time/plus (clj-time/now) (clj-time/days 1))}
+          events     [yesterday today]
+          time-query (clj-time/now)]
+      (t/is (= [yesterday] (atc/remove-timestamps-after events time-query))))))
+
+
+(t/deftest fetch-status-test
+  (t/testing
+    "should not find flight events that happened after the requested time"
+    (let [now                             (clj-time/now)
+          yesterday                       (clj-time/minus now (clj-time/days 1))
+          tomorrow                        (clj-time/plus now (clj-time/days 1))
+          last-week                       (clj-time/minus now (clj-time/days 7))
+          flight-which-refueled-yesterday {:timestamp   yesterday
+                                           :plane-id    "F111"
+                                           :event-type  "Re-Fuel"
+                                           :fuel-status "200"
+                                           :status      "OK"}
+          flights                         {:flights {"F111" [flight-which-refueled-yesterday]}}]
+      (t/is (= nil (atc/fetch-status-at flights last-week)))))
+  (t/testing
+    "should fetch status 'Awaiting-Takeoff' for flights who most recently refueled after a given timestamp"
+    (let [now                             (clj-time/now)
+          yesterday                       (clj-time/minus now (clj-time/days 1))
+          tomorrow                        (clj-time/plus now (clj-time/days 1))
+          last-week                       (clj-time/minus now (clj-time/days 7))
+          flight-which-refueled-yesterday {:timestamp   yesterday
+                                           :plane-id    "F111"
+                                           :event-type  "Re-Fuel"
+                                           :fuel-status "200"
+                                           :status      "OK"}
+          flights                         {:flights {"F111" [flight-which-refueled-yesterday]}}]
+      (t/is (= "Awaiting-Takeoff"
+               (-> (atc/fetch-status-at flights now)
+                   (clj-str/split #" ")
+                   second)))))
+  (t/testing
+    "should fetch status 'F111' for flight F111"
+    (let [now                             (clj-time/now)
+          yesterday                       (clj-time/minus now (clj-time/days 1))
+          tomorrow                        (clj-time/plus now (clj-time/days 1))
+          last-week                       (clj-time/minus now (clj-time/days 7))
+          flight-which-refueled-yesterday {:timestamp   yesterday
+                                           :plane-id    "F111"
+                                           :event-type  "Re-Fuel"
+                                           :fuel-status "200"
+                                           :status      "OK"}
+          flights                         {:flights {"F111" [flight-which-refueled-yesterday]}}]
+      (t/is (= "F111"
+               (-> (atc/fetch-status-at flights now)
+                   (clj-str/split #" ")
+                   first))))))
+
+
 
 (def events
   ["F222 747 DUBLIN LONDON Re-Fuel 2021-03-29T10:00:00 200"

@@ -48,3 +48,42 @@
                           (_comparator (get-in m [key1 k])
                                        (get-in m [key2 k]))))
          m)))
+
+
+(defn remove-timestamps-after
+  [events time-query]
+  (remove #(t/after? (:timestamp %) time-query)
+          events))
+
+(defn parse-filtered-flights
+  [m]
+  (->> {"Re-Fuel"  "Awaiting-Takeoff"
+        "Take-Off" "In-Flight"
+        "Land"     "Landed"}
+       seq
+       (map (fn [[k v]]
+              (when (clojure.string/includes? (:event-type m) k)
+                (clojure.string/replace (:event-type m) k v))))
+       (remove nil?)
+       first
+       (str (:plane-id m) " ")))
+
+
+
+(defn filter-for-latest-fuel-update
+  "Because we need to return the fuel status for each plane, we "
+  [])
+
+
+(defn fetch-status-at
+  "I'm not doing much by way of error handling or considering the sad path
+  But if I had more time I'd experiment with Failjure for handling some cases,
+  like what if the requested time period is in the future"
+  [flights time-query]
+  (some-> flights
+          :flights
+          (get "F111")
+          (remove-timestamps-after time-query)
+          first
+          parse-filtered-flights))
+
