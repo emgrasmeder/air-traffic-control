@@ -51,29 +51,116 @@
 
 
 (defn remove-timestamps-after
+  "Relies on the fact that the events are insert in order such that the most recent timestamp is first, followed by the second most recent timestam, finally the timestamp in the most distant past is the last of the events"
   [events time-query]
-  (remove #(t/after? (:timestamp %) time-query)
+  (->> events
+       (remove #(t/after? (:timestamp %) time-query))
+       seq))
+
+
+(defn remove-timestamps-before
+  "Relies on the fact that the events are insert in order such that the most recent timestamp is first, followed by the second most recent timestam, finally the timestamp in the most distant past is the last of the events"
+  [events time-query]
+  (remove #(t/before? (:timestamp %) time-query)
           events))
 
 (defn parse-filtered-flights
+  "Basically the entire adapter layer here.
+  We're taking some flight data that's using our ubiquitous language inside the program
+  and converting it to readable format for our users. 
+  Sometimes I put these functions in an 'adapters' namespace."
   [m]
-  (->> {"Re-Fuel"  "Awaiting-Takeoff"
-        "Take-Off" "In-Flight"
-        "Land"     "Landed"}
-       seq
-       (map (fn [[k v]]
-              (when (clojure.string/includes? (:event-type m) k)
-                (clojure.string/replace (:event-type m) k v))))
-       (remove nil?)
+  (some->> {"Re-Fuel"  "Awaiting-Takeoff"
+            "Take-Off" "In-Flight"
+            "Land"     "Landed"}
+           seq
+           (map (fn [[k v]]
+                  (when (clojure.string/includes? (:event-type m) k)
+                    (clojure.string/replace (:event-type m) k v))))
+           (remove nil?)
+           first
+           (#(str (:plane-id m) " " % " " (:fuel-status m)))))
+
+
+(defmulti calculate-fuel
+  (fn [events]
+    (println "Parsing Events: " events)
+    (->> events
+         (map #(get % :event-type))
+         (clj-str/join "-")
+         (clj-str/lower-case)
+         keyword)))
+
+
+(defmethod calculate-fuel
+  :land-take-off-re-fuel
+  [events]
+  (let [arrival-event (first (filter #(= "Land" (:event-type %)) events))
+        refuel-event  (first (filter #(= "Re-Fuel" (:event-type %)) events))]
+    (+ (Integer/parseInt (:fuel-status refuel-event))
+       (Integer/parseInt (:fuel-status arrival-event)))))
+
+(defmethod calculate-fuel
+  :land
+  [events]
+  (let [arrival-event (first (filter #(= "Land" (:event-type %)) events))]
+    (:fuel-status arrival-event)))
+
+(defmethod calculate-fuel
+  :re-fuel
+  [events]
+  (println "dispatching thing for just re-fuel: ")
+  (let [re-fuel-event (first (filter #(= "Re-Fuel" (:event-type %)) events))]
+    (:fuel-status re-fuel-event)))
+
+(defmethod calculate-fuel
+  :take-off
+  [_]
+  (println "dispatching thing for just take-off: ")
+  0)
+
+(defmethod calculate-fuel
+  :default
+  [params]
+  (println "I don't do anything, so here's what I've been passed: " params)
+  nil)
+
+
+
+(defn calculate-fuel-diff
+  "Could be very brittle as it is here. This assumes the input events will basically always have a Re-Fuel value or will have just departed"
+  [events]
+  (println "calculating fuel diff")
+  (let [event       (first events)
+        fuel-status (calculate-fuel events)]
+
+    {:plane-id    (:plane-id event)
+     :event-type  (:event-type event)
+     :fuel-status fuel-status}))
+
+
+(defn find-latest-refuel-timestamp
+  [events]
+  (->> events
+       (filter #(= "Re-Fuel" (:event-type %)))
+       (sort-by :timestamp)
        first
-       (str (:plane-id m) " ")))
+       :timestamp))
 
-
-
-(defn filter-for-latest-fuel-update
-  "Because we need to return the fuel status for each plane, we "
-  [])
-
+(defn remove-events-before-latest-refuel
+  "In all of the examples, the desired output value for fuel upon landing is equal to:
+  fuel-value post refuel
+  minus
+  fuel-value post arrival
+  so I assume the post-refuel value is the _amount of fuel in the tank_, and not an amount that has been _added_ to the tank.
+  Thus we don't need to know about any events before the latest refueling"
+  [events]
+  (if (seq (filter #(= "Re-Fuel" (:event-type %)) events))
+    (->> events
+         find-latest-refuel-timestamp
+         (remove-timestamps-before events)
+         seq)
+    events))
 
 (defn fetch-status-at
   "I'm not doing much by way of error handling or considering the sad path
@@ -84,6 +171,6 @@
           :flights
           (get "F111")
           (remove-timestamps-after time-query)
-          first
+          remove-events-before-latest-refuel
+          calculate-fuel-diff
           parse-filtered-flights))
-
