@@ -111,14 +111,13 @@
 
 (t/deftest fetch-status-test
   (t/testing "should not find flight events that happened after the requested time"
-    ; THIS ONE ALMOST WORKS BUT WE NEED TO PARSE IF THERES NO DATA
     (let [refueling-yesterday-event {:timestamp   yesterday
                                      :plane-id    "F111"
                                      :event-type  "Re-Fuel"
                                      :fuel-status "200"
                                      :status      "OK"}
           flights                   {:flights {"F111" [refueling-yesterday-event]}}]
-      (t/is (= nil (atc/fetch-status-at flights last-week)))))
+      (t/is (= "" (atc/fetch-status-at flights last-week)))))
   (t/testing
     "should fetch status 'Awaiting-Takeoff' for flights who most recently refueled after a given timestamp"
     (let [refueling-yesterday-event {:timestamp   yesterday
@@ -187,7 +186,30 @@
       (t/is (= "104"
                (-> (atc/fetch-status-at flights now)
                    (clj-str/split #" ")
-                   (nth 2)))))))
+                   (nth 2)))))
+    (t/testing "should set fuel status regardless for multiple flights "
+      (let [refueling-last-month-event {:timestamp   last-month
+                                        :plane-id    "F111"
+                                        :event-type  "Re-Fuel"
+                                        :fuel-status "428"
+                                        :status      "OK"}
+            take-off-last-week-event {:timestamp   last-week
+                                      :plane-id    "F111"
+                                      :event-type  "Take-Off"
+                                      :fuel-status "0"
+                                      :status      "OK"}
+            arrive-yesterday-event {:timestamp   yesterday
+                                    :plane-id    "F111"
+                                    :event-type  "Land"
+                                    :fuel-status "-324"
+                                    :status      "OK"}
+            flights {:flights {"F111" [arrive-yesterday-event
+                                       take-off-last-week-event
+                                       refueling-last-month-event]
+                               "F222" [(assoc arrive-yesterday-event :plane-id "F222")
+                                       (assoc take-off-last-week-event :plane-id "F222")
+                                       (assoc refueling-last-month-event :plane-id "F222")]}}]
+        (t/is (= "F111 Landed 104\nF222 Landed 104" (atc/fetch-status-at flights now)))))))
 
 (t/deftest calculate-fuel-diff-test
   (t/testing "should compute the fuel level given a refuel, departure, and arrival"
@@ -210,7 +232,6 @@
                                       take-off-last-week-event
                                       refueling-last-month-event]]
       (t/is (= 104 (:fuel-status (atc/calculate-fuel-diff events)))))))
-
 
 
 (def events

@@ -2,7 +2,7 @@
   (:require [clojure.spec.alpha :as s]
             [clojure.string :as clj-str]
             [clj-time.coerce :as c]
-            [clj-time.core :as t]
+            [clj-time.core :as clj-time]
             [air-traffic-control.events :as events]))
 
 (defn parse-event
@@ -30,9 +30,9 @@
   (let [time1 (c/to-date-time t1)
         time2 (c/to-date-time t2)]
     (cond
-      (t/equal? time1 time2)  0
-      (t/before? time1 time2) -1
-      (t/after? time1 time2)  1)))
+      (clj-time/equal? time1 time2)  0
+      (clj-time/before? time1 time2) -1
+      (clj-time/after? time1 time2)  1)))
 
 (defn sort-map-by
   "Written to compare timestamps, but could sort other maps using the `compare` comparator.
@@ -54,14 +54,14 @@
   "Relies on the fact that the events are insert in order such that the most recent timestamp is first, followed by the second most recent timestam, finally the timestamp in the most distant past is the last of the events"
   [events time-query]
   (->> events
-       (remove #(t/after? (:timestamp %) time-query))
+       (remove #(clj-time/after? (:timestamp %) time-query))
        seq))
 
 
 (defn remove-timestamps-before
   "Relies on the fact that the events are insert in order such that the most recent timestamp is first, followed by the second most recent timestam, finally the timestamp in the most distant past is the last of the events"
   [events time-query]
-  (remove #(t/before? (:timestamp %) time-query)
+  (remove #(clj-time/before? (:timestamp %) time-query)
           events))
 
 (defn parse-filtered-flights
@@ -162,15 +162,39 @@
          seq)
     events))
 
-(defn fetch-status-at
-  "I'm not doing much by way of error handling or considering the sad path
-  But if I had more time I'd experiment with Failjure for handling some cases,
-  like what if the requested time period is in the future"
-  [flights time-query]
-  (some-> flights
-          :flights
-          (get "F111")
+(defn get-status-for-flight
+  [time-query coll]
+  (some-> coll
           (remove-timestamps-after time-query)
           remove-events-before-latest-refuel
           calculate-fuel-diff
           parse-filtered-flights))
+
+#_(defn fetch-status-at
+    "I'm not doing much by way of error handling or considering the sad path
+  But if I had more time I'd experiment with Failjure for handling some cases,
+  like what if the requested time period is in the future"
+    [flights time-query]
+    (some-> flights
+            :flights
+            (get "F111")
+            (remove-timestamps-after time-query)
+            remove-events-before-latest-refuel
+            calculate-fuel-diff
+            parse-filtered-flights))
+
+(defn fetch-status-at
+  "I'm not doing much by way of error handling or considering the sad path
+  But if I had more time I'd experiment with Failjure for handling some cases,
+  like what if the requested time period is in the future
+    
+    I also don't chaining these map fns together. I often write recursive functions where
+    for loops would usually be used. i don't know the right abstraction for this yet, though."
+  [flights time-query]
+  (some-> flights
+          :flights
+          (#(seq %))
+          (#(map second %))
+          (#(map (partial get-status-for-flight time-query) %))
+          (#(remove nil? %))
+          (#(clj-str/join "\n" %))))
