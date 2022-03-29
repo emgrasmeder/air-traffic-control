@@ -2,6 +2,8 @@
   (:require [clojure.test :as t]
             [air-traffic-control.core :as atc]
             [clj-time.core :as clj-time]
+            [clj-time.local :as l]
+            [clj-time.coerce :as c]
             [air-traffic-control.events :as events]
             [clojure.spec.alpha :as s]
             [clojure.string :as clj-str]))
@@ -233,20 +235,105 @@
                                       refueling-last-month-event]]
       (t/is (= 104 (:fuel-status (atc/calculate-fuel-diff events)))))))
 
+(t/deftest parse-events-test
+  (t/testing "should only maintain one list of flights"
+    (with-redefs [atc/immutable-state (atom atc/initial-state)]
+      (let [updates [[:update
+                      {:plane-id    "F222"
+                       :model       "747"
+                       :origin      "DUBLIN"
+                       :destination "LONDON"
+                       :event-type  "Re-Fuel"
+                       :timestamp   "2021-03-29T10:00:00"
+                       :fuel-delta  "200"}]
+                     [:update
+                      {:plane-id    "F551"
+                       :model       "747"
+                       :origin      "PARIS"
+                       :destination "LONDON"
+                       :event-type  "Re-Fuel"
+                       :timestamp   "2021-03-29T10:00:00"
+                       :fuel-delta  "345"}]
+                     [:update
+                      {:plane-id    "F324"
+                       :model       "313"
+                       :origin      "LONDON"
+                       :destination "NEWYORK"
+                       :event-type  "Take-Off"
+                       :timestamp   "2021-03-29T12:00:00"
+                       :fuel-delta  "0"}]
+                     [:update
+                      {:plane-id    "F123"
+                       :model       "747"
+                       :origin      "LONDON"
+                       :destination "CAIRO"
+                       :event-type  "Re-Fuel"
+                       :timestamp   "2021-03-29T10:00:00"
+                       :fuel-delta  "428"}]
+                     [:update
+                      {:plane-id    "F123"
+                       :model       "747"
+                       :origin      "LONDON"
+                       :destination "CAIRO"
+                       :event-type  "Take-Off"
+                       :timestamp   "2021-03-29T12:00:00"
+                       :fuel-delta  "0"}]
+                     [:update
+                      {:plane-id    "F551"
+                       :model       "747"
+                       :origin      "PARIS"
+                       :destination "LONDON"
+                       :event-type  "Take-Off"
+                       :timestamp   "2021-03-29T11:00:00"
+                       :fuel-delta  "0"}]
+                     [:update
+                      {:plane-id    "F551"
+                       :model       "747"
+                       :origin      "PARIS"
+                       :destination "LONDON"
+                       :event-type  "Land"
+                       :timestamp   "2021-03-29T12:00:00"
+                       :fuel-delta  "-120"}]
+                     [:update
+                      {:plane-id    "F123"
+                       :model       "747"
+                       :origin      "LONDON"
+                       :destination "CAIRO"
+                       :event-type  "Land"
+                       :timestamp   "2021-03-29T14:00:00"
+                       :fuel-delta  "-324"}]]]
+        (run! atc/update-event-log updates)
+        (t/is (= 4
+                 (-> @atc/immutable-state
+                     :state
+                     :flights
+                     keys
+                     count)))))))
 
-(def events
-  ["F222 747 DUBLIN LONDON Re-Fuel 2021-03-29T10:00:00 200"
-   "F551 747 PARIS LONDON Re-Fuel 2021-03-29T10:00:00 345"
-   "F324 313 LONDON NEWYORK Take-Off 2021-03-29T12:00:00 0"
-   "F123 747 LONDON CAIRO Re-Fuel 2021-03-29T10:00:00 428"
-   "F123 747 LONDON CAIRO Take-Off 2021-03-29T12:00:00 0"
-   "F551 747 PARIS LONDON Take-Off 2021-03-29T11:00:00 0"
-   "F551 747 PARIS LONDON Land 2021-03-29T12:00:00 -120"
-   "F123 747 LONDON CAIRO Land 2021-03-29T14:00:00 -324"])
 
-(def expected-events
-  ["F123 Landed 104" "F222 Awaiting-Takeoff 200" "F324 In-Flight 0"
-   "F551 Landed 225"])
+(t/deftest end-to-end-test
+  (t/testing "should do the first example from the assignment"
+    (with-redefs [atc/immutable-state (atom atc/initial-state)]
+      (let [input-events    (str "F222 747 DUBLIN LONDON Re-Fuel 2021-03-29T10:00:00 200\n"
+                                 "F551 747 PARIS LONDON Re-Fuel 2021-03-29T10:00:00 345\n"
+                                 "F324 313 LONDON NEWYORK Take-Off 2021-03-29T12:00:00 0\n"
+                                 "F123 747 LONDON CAIRO Re-Fuel 2021-03-29T10:00:00 428\n"
+                                 "F123 747 LONDON CAIRO Take-Off 2021-03-29T12:00:00 0\n"
+                                 "F551 747 PARIS LONDON Take-Off 2021-03-29T11:00:00 0\n"
+                                 "F551 747 PARIS LONDON Land 2021-03-29T12:00:00 -120\n"
+                                 "F123 747 LONDON CAIRO Land 2021-03-29T14:00:00 -324")
+            expected-output (str "F123 Landed 104\n"
+                                 "F222 Awaiting-Takeoff 200\n"
+                                 "F324 In-Flight 0\n"
+                                 "F551 Landed 225")]
+        (atc/parse-events input-events)
+        (t/is (= (-> expected-output
+                     (clj-str/split #"\n")
+                     set)
+                 (-> (atc/fetch-status-at (:state @atc/immutable-state)
+                                          (c/to-date-time "2021-03-29T15:00:00"))
+                     (clj-str/split #"\n")
+                     set)))))))
 
 
 

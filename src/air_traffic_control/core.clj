@@ -10,6 +10,8 @@
   (let [maybe-event (clj-str/split s #" ")]
     (s/conform ::events/event maybe-event)))
 
+
+
 (def initial-state {:state {:flights {}}})
 (def immutable-state (atom initial-state))
 
@@ -24,15 +26,26 @@
   [[_ event-details]]
   (events/insert immutable-state event-details))
 
+(defn parse-events
+  ([events]
+   (some->> events
+            (#(clj-str/split % #"\n"))
+            (map parse-event)
+            (run! update-event-log))))
+
+
+
 
 (defn time-comparator
   [t1 t2]
   (let [time1 (c/to-date-time t1)
         time2 (c/to-date-time t2)]
     (cond
-      (clj-time/equal? time1 time2)  0
+      (clj-time/equal? time1 time2) 0
       (clj-time/before? time1 time2) -1
-      (clj-time/after? time1 time2)  1)))
+      (clj-time/after? time1
+                       time2)
+      1)))
 
 (defn sort-map-by
   "Written to compare timestamps, but could sort other maps using the `compare` comparator.
@@ -49,19 +62,22 @@
                                        (get-in m [key2 k]))))
          m)))
 
-
+;probably should make remove-timestamps-after and remove-timestamps-before the same function
+;already
+;
 (defn remove-timestamps-after
   "Relies on the fact that the events are insert in order such that the most recent timestamp is first, followed by the second most recent timestam, finally the timestamp in the most distant past is the last of the events"
   [events time-query]
   (->> events
-       (remove #(clj-time/after? (:timestamp %) time-query))
+       (remove #(clj-time/after? (c/to-date-time (:timestamp %))
+                                 time-query))
        seq))
 
 
 (defn remove-timestamps-before
   "Relies on the fact that the events are insert in order such that the most recent timestamp is first, followed by the second most recent timestam, finally the timestamp in the most distant past is the last of the events"
   [events time-query]
-  (remove #(clj-time/before? (:timestamp %) time-query)
+  (remove #(clj-time/before? (c/to-date-time (:timestamp %)) (c/to-date-time time-query))
           events))
 
 (defn parse-filtered-flights
@@ -84,7 +100,6 @@
 
 (defmulti calculate-fuel
   (fn [events]
-    (println "Parsing Events: " events)
     (->> events
          (map #(get % :event-type))
          (clj-str/join "-")
@@ -109,14 +124,12 @@
 (defmethod calculate-fuel
   :re-fuel
   [events]
-  (println "dispatching thing for just re-fuel: ")
   (let [re-fuel-event (first (filter #(= "Re-Fuel" (:event-type %)) events))]
     (:fuel-status re-fuel-event)))
 
 (defmethod calculate-fuel
   :take-off
   [_]
-  (println "dispatching thing for just take-off: ")
   0)
 
 (defmethod calculate-fuel
@@ -126,11 +139,9 @@
   nil)
 
 
-
 (defn calculate-fuel-diff
   "Could be very brittle as it is here. This assumes the input events will basically always have a Re-Fuel value or will have just departed"
   [events]
-  (println "calculating fuel diff")
   (let [event       (first events)
         fuel-status (calculate-fuel events)]
 
@@ -170,31 +181,20 @@
           calculate-fuel-diff
           parse-filtered-flights))
 
-#_(defn fetch-status-at
-    "I'm not doing much by way of error handling or considering the sad path
-  But if I had more time I'd experiment with Failjure for handling some cases,
-  like what if the requested time period is in the future"
-    [flights time-query]
-    (some-> flights
-            :flights
-            (get "F111")
-            (remove-timestamps-after time-query)
-            remove-events-before-latest-refuel
-            calculate-fuel-diff
-            parse-filtered-flights))
 
 (defn fetch-status-at
-  "I'm not doing much by way of error handling or considering the sad path
+  "I'm not doing anything by way of error handling or considering the sad path
   But if I had more time I'd experiment with Failjure for handling some cases,
   like what if the requested time period is in the future
     
     I also don't chaining these map fns together. I often write recursive functions where
     for loops would usually be used. i don't know the right abstraction for this yet, though."
   [flights time-query]
-  (some->> flights
-           :flights
-           seq
-           (map second)
-           (map (partial get-status-for-flight time-query))
-           (remove nil?)
-           (clj-str/join "\n")))
+  (let [time-query (c/to-date-time time-query)]
+    (some->> flights
+             :flights
+             seq
+             (map second)
+             (map (partial get-status-for-flight time-query))
+             (remove nil?)
+             (clj-str/join "\n"))))
