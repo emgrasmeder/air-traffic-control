@@ -191,10 +191,10 @@
     I also don't chaining these map fns together. I often write recursive functions where
     for loops would usually be used. i don't know the right abstraction for this yet, though."
   [flights time-query]
-  (some-> flights
-          :flights
-          (#(seq %))
-          (#(map second %))
-          (#(map (partial get-status-for-flight time-query) %))
-          (#(remove nil? %))
-          (#(clj-str/join "\n" %))))
+  (some->> flights
+           :flights
+           seq
+           (map second)
+           (map (partial get-status-for-flight time-query))
+           (remove nil?)
+           (clj-str/join "\n")))
