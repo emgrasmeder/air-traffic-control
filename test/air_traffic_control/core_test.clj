@@ -211,7 +211,38 @@
                                "F222" [(assoc arrive-yesterday-event :plane-id "F222")
                                        (assoc take-off-last-week-event :plane-id "F222")
                                        (assoc refueling-last-month-event :plane-id "F222")]}}]
-        (t/is (= "F111 Landed 104\nF222 Landed 104" (atc/fetch-status-at flights now)))))))
+        (t/is (= "F111 Landed 104\nF222 Landed 104" (atc/fetch-status-at flights now)))))
+
+
+
+
+    (t/testing "should ignore invalidated records"
+      (let [invalid-refueling-last-month-event {:timestamp   last-month
+                                                :plane-id    "F111"
+                                                :event-type  "Re-Fuel"
+                                                :fuel-status "9999999"
+                                                :status      "INVALID"}
+            refueling-last-month-event         {:timestamp   last-month
+                                                :plane-id    "F111"
+                                                :event-type  "Re-Fuel"
+                                                :fuel-status "428"
+                                                :status      "OK"}
+            take-off-last-week-event           {:timestamp   last-week
+                                                :plane-id    "F111"
+                                                :event-type  "Take-Off"
+                                                :fuel-status "0"
+                                                :status      "OK"}
+            arrive-yesterday-event             {:timestamp   yesterday
+                                                :plane-id    "F111"
+                                                :event-type  "Land"
+                                                :fuel-status "-324"
+                                                :status      "OK"}
+            flights                            {:flights {"F111" [invalid-refueling-last-month-event
+                                                                  arrive-yesterday-event
+                                                                  take-off-last-week-event
+                                                                  refueling-last-month-event]}}]
+        (t/is (= "F111 Landed 104" (atc/fetch-status-at flights now)))))))
+
 
 (t/deftest calculate-fuel-diff-test
   (t/testing "should compute the fuel level given a refuel, departure, and arrival"
@@ -311,6 +342,7 @@
                      count)))))))
 
 
+
 (t/deftest end-to-end-test
   (t/testing "should do the first example from the assignment"
     (with-redefs [atc/immutable-state (atom atc/initial-state)]
@@ -333,7 +365,79 @@
                  (-> (atc/fetch-status-at (:state @atc/immutable-state)
                                           (c/to-date-time "2021-03-29T15:00:00"))
                      (clj-str/split #"\n")
+                     set))))))
+  (t/testing "should recieve updates"
+    (with-redefs [atc/immutable-state (atom atc/initial-state)]
+      (let [input-events    (str "F222 747 DUBLIN LONDON Re-Fuel 2021-03-29T10:00:00 200\n"
+                                 "F551 747 PARIS LONDON Re-Fuel 2021-03-29T10:00:00 345\n"
+                                 "F324 313 LONDON NEWYORK Take-Off 2021-03-29T12:00:00 0\n"
+                                 "F123 747 LONDON CAIRO Re-Fuel 2021-03-29T10:00:00 428\n"
+                                 "F123 747 LONDON CAIRO Take-Off 2021-03-29T12:00:00 0\n"
+                                 "F551 747 PARIS LONDON Take-Off 2021-03-29T11:00:00 0\n"
+                                 "F551 747 PARIS LONDON Land 2021-03-29T12:00:00 -120\n"
+                                 "F123 747 LONDON CAIRO Land 2021-03-29T14:00:00 -324")
+            expected-output (str "F123 Landed 104\n"
+                                 "F222 Awaiting-Takeoff 200\n"
+                                 "F324 In-Flight 0\n"
+                                 "F551 Landed 45")
+            update-msg      "F551 747 PARIS LONDON Land 2021-03-29T12:00:00 -300"]
+        (atc/parse-events input-events)
+        (atc/parse-events update-msg)
+        (t/is (= (-> expected-output
+                     (clj-str/split #"\n")
+                     set)
+                 (-> (atc/fetch-status-at (:state @atc/immutable-state)
+                                          (c/to-date-time "2021-03-29T15:00:00"))
+                     (clj-str/split #"\n")
                      set)))))))
 
 
+(t/deftest get-status-for-flight-test
+  (t/testing "should not cut off the fuel amount even if there are duplicates"
+    (let [input           [{:timestamp   (c/to-date-time "2022-02-18T14:58:30.628Z")
+                            :plane-id    "F111"
+                            :event-type  "Re-Fuel"
+                            :fuel-status "9999999"
+                            :status      "INVALID"}
+                           {:timestamp   (c/to-date-time "2022-03-29T14:58:30.628Z")
+                            :plane-id    "F111"
+                            :event-type  "Land"
+                            :fuel-status "-324"
+                            :status      "OK"}
+                           {:timestamp   (c/to-date-time "2022-03-22T14:58:30.628Z")
+                            :plane-id    "F111"
+                            :event-type  "Take-Off"
+                            :fuel-status "0"
+                            :status      "OK"}
+                           {:timestamp   (c/to-date-time "2022-02-18T14:58:30.628Z")
+                            :plane-id    "F111"
+                            :event-type  "Re-Fuel"
+                            :fuel-status "428"
+                            :status      "OK"}]
+          unmapped-output ((partial atc/get-status-for-flight now) input)]
+      (t/is (= "F111 Landed 104" unmapped-output)))))
 
+(t/deftest calculate-fuel-diff
+  (t/testing "should give us the correct fuel diff"
+    (let [events [{:timestamp   (c/to-date-time "2022-02-18T14:58:30.628Z")
+                   :plane-id    "F111"
+                   :event-type  "Re-Fuel"
+                   :fuel-status "9999999"
+                   :status      "INVALID"}
+                  {:timestamp   (c/to-date-time "2022-03-29T14:58:30.628Z")
+                   :plane-id    "F111"
+                   :event-type  "Land"
+                   :fuel-status "-324"
+                   :status      "OK"}
+                  {:timestamp   (c/to-date-time "2022-03-22T14:58:30.628Z")
+                   :plane-id    "F111"
+                   :event-type  "Take-Off"
+                   :fuel-status "0"
+                   :status      "OK"}
+                  {:timestamp   (c/to-date-time "2022-02-18T14:58:30.628Z")
+                   :plane-id    "F111"
+                   :event-type  "Re-Fuel"
+                   :fuel-status "428"
+                   :status      "OK"}]
+          result (atc/calculate-fuel-diff events)]
+      (t/is (= 104 (:fuel-status result))))))

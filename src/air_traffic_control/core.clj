@@ -64,7 +64,6 @@
 
 ;probably should make remove-timestamps-after and remove-timestamps-before the same function
 ;already
-;
 (defn remove-timestamps-after
   "Relies on the fact that the events are insert in order such that the most recent timestamp is first, followed by the second most recent timestam, finally the timestamp in the most distant past is the last of the events"
   [events time-query]
@@ -143,7 +142,7 @@
   "Could be very brittle as it is here. This assumes the input events will basically always have a Re-Fuel value or will have just departed"
   [events]
   (let [event       (first events)
-        fuel-status (calculate-fuel events)]
+        fuel-status (calculate-fuel (filter #(= "OK" (:status %)) events))]
 
     {:plane-id    (:plane-id event)
      :event-type  (:event-type event)
@@ -173,11 +172,17 @@
          seq)
     events))
 
+(defn filter-out-not-ok-events
+  [events]
+  (filter #(= "OK" (:status %)) events))
+
+
 (defn get-status-for-flight
   [time-query coll]
   (some-> coll
           (remove-timestamps-after time-query)
           remove-events-before-latest-refuel
+          filter-out-not-ok-events
           calculate-fuel-diff
           parse-filtered-flights))
 

@@ -42,7 +42,38 @@
 (s/def ::timestamp #(inst? (instant/read-instant-date %)))
 
 
-(defn add-event-to-flights-log
+
+(defn update-maps-in-collection
+  "updates maps whose have value v at key k in a collection"
+  [collection k v updater]
+  (reduce
+    (fn [coll m]
+      (conj coll
+            (if (= (get m k) v)
+              (updater m)
+              m)))
+    []
+    collection))
+
+
+(defn add-event-to-events
+  "Sets status to INVALID if an event at the same timestamp already exists"
+  [new-event events]
+  (let [new-event-time (:timestamp new-event)
+        new-event      (-> new-event
+                           (assoc :status "OK")
+                           (#(conj [] %)))]
+
+    (-> events
+        (update-maps-in-collection :timestamp
+                                   new-event-time
+                                   (fn [m]
+                                     (assoc m :status "INVALID")))
+        (concat new-event))))
+
+
+
+(defn add-event-to-flights-log-old
   [new-event events]
   (-> new-event
       (select-keys [:timestamp :plane-id :event-type :fuel-delta])
@@ -54,10 +85,20 @@
       (#(sort-by :timestamp %))
       reverse))
 
+(defn add-event-to-flights-log
+  [new-event events]
+  (-> new-event
+      (select-keys [:timestamp :plane-id :event-type :fuel-delta])
+      (clj-set/rename-keys {:fuel-delta :fuel-status})
+      (add-event-to-events events)
+      (#(filter identity %))
+      (#(sort-by :timestamp %))
+      reverse))
+
 (defn insert
   "Inserts events into the program state. It should be an event sourcing solution but
   I don't have much experience with protocols and multimethods and figuring it out was going too slow
-  so I opted for something that worked over."
+  so I opted for this"
   [state new-event]
   (swap! state #(update-in %
                            [:state :flights (:plane-id new-event)]
