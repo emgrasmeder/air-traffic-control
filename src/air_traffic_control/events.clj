@@ -58,32 +58,32 @@
 
 (defn add-event-to-events
   "Sets status to INVALID if an event at the same timestamp already exists"
-  [new-event events]
-  (let [new-event-time (:timestamp new-event)
-        new-event      (-> new-event
-                           (assoc :status "OK")
-                           (#(conj [] %)))]
+  ([new-event events] (add-event-to-events new-event events "OK"))
+  ([new-event events status]
+   (let [new-event-time (:timestamp new-event)
+         new-event      (-> new-event
+                            (assoc :status status)
+                            (#(conj [] %)))]
 
-    (-> events
-        (update-maps-in-collection :timestamp
-                                   new-event-time
-                                   (fn [m]
-                                     (assoc m :status "INVALID")))
-        (concat new-event))))
+     (-> events
+         (update-maps-in-collection :timestamp
+                                    new-event-time
+                                    (fn [m]
+                                      (assoc m :status "INVALID")))
+         (concat new-event)))))
 
 
 
-(defn add-event-to-flights-log-old
+(defn invalidate-event-in-flights-log
+  "Expects an event with :plane-id and :timestamp keys, finds any matching events
+  and makes them as INVALID"
   [new-event events]
   (-> new-event
-      (select-keys [:timestamp :plane-id :event-type :fuel-delta])
-      (clj-set/rename-keys {:fuel-delta :fuel-status})
-      (assoc :status "OK")
-      (#(conj [] %))
-      (concat events)
+      (add-event-to-events events "INVALID")
       (#(filter identity %))
       (#(sort-by :timestamp %))
       reverse))
+
 
 (defn add-event-to-flights-log
   [new-event events]
@@ -103,3 +103,12 @@
   (swap! state #(update-in %
                            [:state :flights (:plane-id new-event)]
                            (partial add-event-to-flights-log new-event))))
+
+(defn invalidate
+  "Inserts events into the program state. It should be an event sourcing solution but
+  I don't have much experience with protocols and multimethods and figuring it out was going too slow
+  so I opted for this"
+  [state new-event]
+  (swap! state #(update-in %
+                           [:state :flights (:plane-id new-event)]
+                           (partial invalidate-event-in-flights-log new-event))))

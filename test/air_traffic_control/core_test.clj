@@ -389,7 +389,33 @@
                  (-> (atc/fetch-status-at (:state @atc/immutable-state)
                                           (c/to-date-time "2021-03-29T15:00:00"))
                      (clj-str/split #"\n")
+                     set))))))
+
+  (t/testing "should invalidate events to remove events from log"
+    (with-redefs [atc/immutable-state (atom atc/initial-state)]
+      (let [input-events    (str "F222 747 DUBLIN LONDON Re-Fuel 2021-03-29T10:00:00 200\n"
+                                 "F551 747 PARIS LONDON Re-Fuel 2021-03-29T10:00:00 345\n"
+                                 "F324 313 LONDON NEWYORK Take-Off 2021-03-29T12:00:00 0\n"
+                                 "F123 747 LONDON CAIRO Re-Fuel 2021-03-29T10:00:00 428\n"
+                                 "F123 747 LONDON CAIRO Take-Off 2021-03-29T12:00:00 0\n"
+                                 "F551 747 PARIS LONDON Take-Off 2021-03-29T11:00:00 0\n"
+                                 "F551 747 PARIS LONDON Land 2021-03-29T12:00:00 -120\n"
+                                 "F123 747 LONDON CAIRO Land 2021-03-29T14:00:00 -324")
+            expected-output (str "F123 Landed 104\n"
+                                 "F222 Awaiting-Takeoff 200\n"
+                                 "F324 In-Flight 0\n"
+                                 "F551 In-Flight 345\n")
+            update-msg      "F551 2021-03-29T12:00:00"]
+        (atc/parse-events input-events)
+        (atc/parse-events update-msg)
+        (t/is (= (-> expected-output
+                     (clj-str/split #"\n")
+                     set)
+                 (-> (atc/fetch-status-at (:state @atc/immutable-state)
+                                          (c/to-date-time "2021-03-29T15:00:00"))
+                     (clj-str/split #"\n")
                      set)))))))
+
 
 
 (t/deftest get-status-for-flight-test
@@ -441,3 +467,12 @@
                    :status      "OK"}]
           result (atc/calculate-fuel-diff events)]
       (t/is (= 104 (:fuel-status result))))))
+
+
+(let [events [{:event-type "Take-Off"} {:event-type "Re-Fuel"}]]
+  (->> events
+       (map #(get % :event-type))
+       (clj-str/join "-")
+       (clj-str/lower-case)
+       keyword))
+

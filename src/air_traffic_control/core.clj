@@ -19,12 +19,16 @@
 (defmethod update-event-log
   :update
   [[_ event-details]]
-  (events/insert immutable-state event-details))
+  (do
+    (println "Handling update event")
+    (events/insert immutable-state event-details)))
 
 (defmethod update-event-log
   :removal
   [[_ event-details]]
-  (events/insert immutable-state event-details))
+  (do
+    (println "Handling removal event")
+    (events/invalidate immutable-state event-details)))
 
 (defn parse-events
   ([events]
@@ -122,6 +126,12 @@
 
 (defmethod calculate-fuel
   :re-fuel
+  [events]
+  (let [re-fuel-event (first (filter #(= "Re-Fuel" (:event-type %)) events))]
+    (:fuel-status re-fuel-event)))
+
+(defmethod calculate-fuel
+  :take-off-re-fuel
   [events]
   (let [re-fuel-event (first (filter #(= "Re-Fuel" (:event-type %)) events))]
     (:fuel-status re-fuel-event)))
