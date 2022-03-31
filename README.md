@@ -24,3 +24,16 @@ Run your nREPL with
 Run the tests with 
 `clj -X:test` 
 
+## Example
+ ```
+(with-redefs [immutable-state (atom initial-state)]
+    (let [input-events (str
+                         "F111 747 start stop Re-Fuel 2000-01-01T00:00:00 100\n"
+                         "F2 747 start stop Take-Off 2000-01-01T00:00:00 0\n"
+                         "F3 711 start stop Land 2000-01-01T00:00:00 100\n")
+          _ (parse-events! input-events)]
+  (fetch-status-at "2022-01-02T00:00:00")
+```
+; (out) F111 Awaiting-Takeoff 100
+; (out) F2 In-Flight 0
+; (out) F3 Landed 100
