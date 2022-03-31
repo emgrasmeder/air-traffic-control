@@ -266,7 +266,7 @@
                                       refueling-last-month-event]]
       (t/is (= 104 (:fuel-status (atc/calculate-fuel-diff events)))))))
 
-(t/deftest parse-events-test
+(t/deftest parse-events!-test
   (t/testing "should only maintain one list of flights"
     (with-redefs [atc/immutable-state (atom atc/initial-state)]
       (let [updates [[:update
@@ -358,7 +358,7 @@
                                  "F222 Awaiting-Takeoff 200\n"
                                  "F324 In-Flight 0\n"
                                  "F551 Landed 225")]
-        (atc/parse-events input-events)
+        (atc/parse-events! input-events)
         (t/is (= (-> expected-output
                      (clj-str/split #"\n")
                      set)
@@ -381,8 +381,8 @@
                                  "F324 In-Flight 0\n"
                                  "F551 Landed 45")
             update-msg      "F551 747 PARIS LONDON Land 2021-03-29T12:00:00 -300"]
-        (atc/parse-events input-events)
-        (atc/parse-events update-msg)
+        (atc/parse-events! input-events)
+        (atc/parse-events! update-msg)
         (t/is (= (-> expected-output
                      (clj-str/split #"\n")
                      set)
@@ -406,8 +406,8 @@
                                  "F324 In-Flight 0\n"
                                  "F551 In-Flight 345\n")
             update-msg      "F551 2021-03-29T12:00:00"]
-        (atc/parse-events input-events)
-        (atc/parse-events update-msg)
+        (atc/parse-events! input-events)
+        (atc/parse-events! update-msg)
         (t/is (= (-> expected-output
                      (clj-str/split #"\n")
                      set)
@@ -469,10 +469,102 @@
       (t/is (= 104 (:fuel-status result))))))
 
 
-(let [events [{:event-type "Take-Off"} {:event-type "Re-Fuel"}]]
-  (->> events
-       (map #(get % :event-type))
-       (clj-str/join "-")
-       (clj-str/lower-case)
-       keyword))
+(t/deftest all-combinations-test
+  (t/testing "should work for single events"
+    (with-redefs [atc/immutable-state (atom atc/initial-state)]
+      (let [input-events (str
+                           "F1-Refuel 747 start stop Re-Fuel 2000-01-01T00:00:00 100\n"
+                           "F2-TakeOff 747 start stop Re-Fuel 2000-01-01T00:00:00 100\n"
+                           "F3-Land 747 start stop Re-Fuel 2000-01-01T00:00:00 100\n")
+            _ (atc/parse-events! input-events)
+            result       (atc/fetch-status-at "2022-01-02T00:00:00")]
+        (t/is
+          (= (str
+               "F1-Refuel Awaiting-Takeoff 100\n"
+               "F2-TakeOff Awaiting-Takeoff 100\n"
+               "F3-Land Awaiting-Takeoff 100")
+             result)))))
+  (t/testing "should work for all combinations of two events"
+    (with-redefs [atc/immutable-state (atom atc/initial-state)]
+      (let [input-events     (str
+                               "F12-RefuelTakeOff 747 start stop Re-Fuel 2000-01-01T00:00:00 100\n"
+                               "F12-RefuelTakeOff 747 start stop Take-Off 2001-01-01T00:00:00 0\n"
+
+                               "F13-RefuelLand 747 start stop Re-Fuel 2000-01-01T00:00:00 100\n"
+                               "F13-RefuelLand 747 start stop Land 2001-01-01T00:00:00 200\n"
+
+                               "F21-TakeOffRefuel 747 start stop Take-Off 2000-01-01T00:00:00 100\n"
+                               "F21-TakeOffRefuel 747 start stop Re-Fuel 2001-01-01T00:00:00 200\n"
+
+                               "F31-LandRefuel 747 start stop Land 2000-01-01T00:00:00 100\n"
+                               "F31-LandRefuel 747 start stop Re-Fuel 2001-01-01T00:00:00 200\n"
+
+                               "F23-TakeOffLand 747 start stop Take-Off 2000-01-01T00:00:00 100\n"
+                               "F23-TakeOffLand 747 start stop Land 2001-01-01T00:00:00 200\n"
+
+                               "F32-LandTakeOff 747 start stop Land 2000-01-01T00:00:00 100\n"
+                               "F32-LandTakeOff 747 start stop Take-Off 2001-01-01T00:00:00 0\n")
+            expected-results (str
+                               "F12-RefuelTakeOff In-Flight 100\n"
+                               "F13-RefuelLand Landed 200\n"
+                               "F21-TakeOffRefuel Awaiting-Takeoff 200\n"
+                               "F31-LandRefuel Awaiting-Takeoff 200\n"
+                               "F23-TakeOffLand Landed 200\n"
+                               "F32-LandTakeOff In-Flight 100")
+
+
+            _ (atc/parse-events! input-events)
+            result           (atc/fetch-status-at "2022-01-02T00:00:00")]
+        (t/is (= (-> expected-results
+                     (clj-str/split #"\n")
+                     set)
+                 (-> result
+                     (clj-str/split #"\n")
+                     set))))))
+  (t/testing "should work for all combinations of 3 events"
+    (with-redefs [atc/immutable-state (atom atc/initial-state)]
+      (let [input-events
+            (str
+              "F123-RefuelTakeOffLand 747 start stop Re-Fuel 2000-01-01T00:00:00 100\n"
+              "F123-RefuelTakeOffLand 747 start stop Take-Off 2001-01-01T00:00:00 200\n"
+              "F123-RefuelTakeOffLand 747 start stop Land 2002-01-01T00:00:00 -300\n"
+
+              "F132-RefuelLandTakeOff 747 start stop Re-Fuel 2000-01-01T00:00:00 100\n"
+              "F132-RefuelLandTakeOff 747 start stop Land 2001-01-01T00:00:00 200\n"
+              "F132-RefuelLandTakeOff 747 start stop Take-Off 2002-01-01T00:00:00 0\n"
+
+              "F213-TakeOffRefuelLand 747 start stop Take-Off 2000-01-01T00:00:00 100\n"
+              "F213-TakeOffRefuelLand 747 start stop Re-Fuel 2001-01-01T00:00:00 200\n"
+              "F213-TakeOffRefuelLand 747 start stop Land 2002-01-01T00:00:00 300\n"
+
+              "F231-TakeOffLandRefuel 747 start stop Take-Off 2000-01-01T00:00:00 100\n"
+              "F231-TakeOffLandRefuel 747 start stop Land 2001-01-01T00:00:00 200\n"
+              "F231-TakeOffLandRefuel 747 start stop Re-Fuel 2002-01-01T00:00:00 300\n"
+
+              "F312-LandRefuelTakeOff 747 start stop Land 2000-01-01T00:00:00 100\n"
+              "F312-LandRefuelTakeOff 747 start stop Re-Fuel 2001-01-01T00:00:00 200\n"
+              "F312-LandRefuelTakeOff 747 start stop Take-Off 2002-01-01T00:00:00 0\n"
+
+              "F321-LandTakeOffRefuel 747 start stop Land 2000-01-01T00:00:00 100\n"
+              "F321-LandTakeOffRefuel 747 start stop Take-Off 2001-01-01T00:00:00 200\n"
+              "F321-LandTakeOffRefuel 747 start stop Re-Fuel 2002-01-01T00:00:00 300\n")
+
+
+            expected-results (str
+                               "F123-RefuelTakeOffLand Landed -200\n"
+                               "F132-RefuelLandTakeOff In-Flight 200\n"
+                               "F213-TakeOffRefuelLand Landed 300\n"
+                               "F231-TakeOffLandRefuel Awaiting-Takeoff 300\n"
+                               "F312-LandRefuelTakeOff In-Flight 200\n"
+                               "F321-LandTakeOffRefuel Awaiting-Takeoff 300")
+
+
+            _ (atc/parse-events! input-events)
+            result           (atc/fetch-status-at "2022-01-02T00:00:00")]
+        (t/is (= (-> expected-results
+                     (clj-str/split #"\n")
+                     set)
+                 (-> result
+                     (clj-str/split #"\n")
+                     set)))))))
 

@@ -30,7 +30,8 @@
     (println "Handling removal event")
     (events/invalidate immutable-state event-details)))
 
-(defn parse-events
+(defn parse-events!
+  "This is the main entry point for inserting new data. "
   ([events]
    (some->> events
             (#(clj-str/split % #"\n"))
@@ -100,41 +101,89 @@
            first
            (#(str (:plane-id m) " " % " " (:fuel-status m)))))
 
+(defn event-dispatcher
+  [events]
+  (->> events
+       (sort-by :timestamp)
+       (map #(get % :event-type))
+       (clj-str/join "-")
+       (clj-str/lower-case)
+       keyword))
+
+
 
 (defmulti calculate-fuel
-  (fn [events]
-    (->> events
-         (map #(get % :event-type))
-         (clj-str/join "-")
-         (clj-str/lower-case)
-         keyword)))
+  event-dispatcher)
+
+
+(defn find-fuel-value-for
+  [events kw-filter]
+  (->> events
+       (filter #(= kw-filter (:event-type %)))
+       first
+       :fuel-status))
 
 
 (defmethod calculate-fuel
   :land-take-off-re-fuel
   [events]
-  (let [arrival-event (first (filter #(= "Land" (:event-type %)) events))
-        refuel-event  (first (filter #(= "Re-Fuel" (:event-type %)) events))]
-    (+ (Integer/parseInt (:fuel-status refuel-event))
-       (Integer/parseInt (:fuel-status arrival-event)))))
+  (+ (Integer/parseInt (find-fuel-value-for events "Re-Fuel"))
+     (Integer/parseInt (find-fuel-value-for events "Land"))))
 
 (defmethod calculate-fuel
   :land
   [events]
-  (let [arrival-event (first (filter #(= "Land" (:event-type %)) events))]
-    (:fuel-status arrival-event)))
+  (Integer/parseInt (find-fuel-value-for events "Land")))
 
 (defmethod calculate-fuel
   :re-fuel
   [events]
-  (let [re-fuel-event (first (filter #(= "Re-Fuel" (:event-type %)) events))]
-    (:fuel-status re-fuel-event)))
+  (Integer/parseInt (find-fuel-value-for events "Re-Fuel")))
 
 (defmethod calculate-fuel
   :take-off-re-fuel
   [events]
-  (let [re-fuel-event (first (filter #(= "Re-Fuel" (:event-type %)) events))]
-    (:fuel-status re-fuel-event)))
+  (println "Missing 'Land' event, but accepting the new Re-Fuel event as legitimate")
+  (Integer/parseInt (find-fuel-value-for events "Re-Fuel")))
+
+(defmethod calculate-fuel
+  :land-re-fuel
+  [events]
+  (find-fuel-value-for events "Re-Fuel"))
+
+(defmethod calculate-fuel
+  :land-take-off
+  [events]
+  (Integer/parseInt (find-fuel-value-for events "Land")))
+
+(defmethod calculate-fuel
+  :re-fuel-take-off
+  [events]
+  (Integer/parseInt (find-fuel-value-for events "Re-Fuel")))
+
+(defmethod calculate-fuel
+  :re-fuel-take-off-land
+  [events]
+  (+ (Integer/parseInt (find-fuel-value-for events "Re-Fuel"))
+     (Integer/parseInt (find-fuel-value-for events "Land"))))
+
+
+(defmethod calculate-fuel
+  :re-fuel-land-take-off
+  [events]
+  (do
+    (println "Found some wonky flight logs, but assuming the most recent event is most up to date")
+    (Integer/parseInt (find-fuel-value-for events "Land"))))
+
+(defmethod calculate-fuel
+  :take-off-land
+  [events]
+  (find-fuel-value-for events "Land"))
+
+(defmethod calculate-fuel
+  :re-fuel-land
+  [events]
+  (find-fuel-value-for events "Land"))
 
 (defmethod calculate-fuel
   :take-off
@@ -144,7 +193,9 @@
 (defmethod calculate-fuel
   :default
   [params]
-  (println "I don't do anything, so here's what I've been passed: " params)
+  (do
+    (println "I don't do anything, so here's what I've been passed: " params)
+    (println "This was my dispatch value:" (event-dispatcher params)))
   nil)
 
 
@@ -204,12 +255,31 @@
     
     I also don't chaining these map fns together. I often write recursive functions where
     for loops would usually be used. i don't know the right abstraction for this yet, though."
-  [flights time-query]
-  (let [time-query (c/to-date-time time-query)]
-    (some->> flights
-             :flights
-             seq
-             (map second)
-             (map (partial get-status-for-flight time-query))
-             (remove nil?)
-             (clj-str/join "\n"))))
+  ([time-query] (fetch-status-at (:state @immutable-state) time-query))
+  ([flights time-query]
+   (let [time-query (c/to-date-time time-query)]
+     (some->> flights
+              :flights
+              seq
+              (map second)
+              (map (partial get-status-for-flight time-query))
+              (remove nil?)
+              (clj-str/join "\n")))))
+
+(comment
+  " You can play around with the code in either test/air-traffic-control.core-test 
+  or right here. Adding an event causes a side effect in an atom, querying for that state
+  assumes the atom has events in it. 
+  
+  `parse-events!` is your main function, which adds  events to the state
+  `fetch-status-at` is the way to fetch data from that state map"
+
+
+  (with-redefs [immutable-state (atom initial-state)]
+    (let [input-events (str
+                         "F111 747 start stop Re-Fuel 2000-01-01T00:00:00 100\n"
+                         "F2 747 start stop Take-Off 2000-01-01T00:00:00 100\n"
+                         "F3 711 start stop Land 2000-01-01T00:00:00 100\n")
+          _ (parse-events! input-events)
+          result       (fetch-status-at "2022-01-02T00:00:00")]
+      (println result))))
