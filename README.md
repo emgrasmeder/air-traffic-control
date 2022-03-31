@@ -5,7 +5,7 @@ This is a little program to find the status of a given set of flights
 To interact with the code, you need to have the clojure cli. You can download it [here](https://clojure.org/guides/getting_started#_clojure_installer_and_cli_tools)
 
 Then you'll need an editor connected to a REPL. 
-I use [Conjure](https://github.com/Olical/conjure/wiki/Quick-start:-Clojure). You can start the REPL (described below), then use `<leader>ee` in front of any s-expression to execute the code. 
+I use [Conjure](https://github.com/Olical/conjure/wiki/Quick-start:-Clojure) with Neovim. You can start the REPL (described below), then use `<leader>ee` in front of any s-expression to execute the code. 
 
  
 You can play around with the code in either test/air-traffic-control/core-test 
